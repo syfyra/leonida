@@ -233,6 +233,45 @@ class W64Graphics(unittest.TestCase):
             self.assertIn("w64_graphics.py", err)
 
 
+class TableRow(unittest.TestCase):
+    def runs(self, *texts):
+        return list(zip(("native", "LEONIDA_W64_EMULATE=1"), map(rec.parse_log, texts)))
+
+    def test_cells(self):
+        row = rec.table_row(self.runs(NATIVE, EMULATED), FACTS, "Vendor.txt")
+        cells = [cell.strip() for cell in row.strip().strip("|").split(" | ")]
+        self.assertEqual(len(cells), 8)
+        self.assertEqual(cells[0], "Vendor One 9000, subgroup 32..32")
+        self.assertEqual(cells[1], "VENDOR 617.42, Vulkan 1.4.351, Windows 11, 10.0.1")
+        self.assertEqual(cells[2], "`aaaaaaa`")
+        self.assertEqual(cells[3], "12/12 translated, 12 valid (run_gpu_tests.py)")
+        self.assertEqual(cells[5], "6/10 passed, 3 skipped, 1 failed (native); "
+                                   "7/10 passed, 1 skipped, 2 failed (`LEONIDA_W64_EMULATE=1`)")
+        self.assertEqual(cells[6], "`cs_atomic`, `cs_w64_b`")
+        self.assertEqual(cells[7], "[local note](../gpu-test-results/Vendor.txt)")
+        self.assertTrue(row.endswith(" |\n"))
+
+    def test_equal_runs_and_missing_facts(self):
+        clean = "device: X (subgroup 32..64)\n1/1 passed\n"
+        row = rec.table_row(self.runs(clean, clean), dict(FACTS, driver=None, api=None, commit=None), None)
+        self.assertIn("| 1/1 passed, 0 skipped, 0 failed (native and `LEONIDA_W64_EMULATE=1` alike) | none |", row)
+        self.assertIn("| Windows 11, 10.0.1 | (add it) | not run | not run |", row)
+        self.assertTrue(row.endswith("| (link the record) |\n"))
+
+    def test_main_prints_it_alone_or_after_out(self):
+        with tempfile.TemporaryDirectory() as d:
+            log, target = os.path.join(d, "n.log"), os.path.join(d, "Mine.txt")
+            with open(log, "w", encoding="utf-8", newline="\n") as f:
+                f.write(NATIVE)
+            code, out, _ = run_main(["--native", log, "--table-row"])
+            self.assertEqual(code, 0)
+            self.assertTrue(out.startswith("| Vendor One 9000") and out.count("\n") == 1)
+            code, out, _ = run_main(["--native", log, "--table-row", "--out", target])
+            self.assertEqual(code, 0)
+            self.assertIn("[local note](../gpu-test-results/Mine.txt)", out)
+            self.assertTrue(os.path.isfile(target))
+
+
 class Machine(unittest.TestCase):
     def test_reads_tools_through_their_output(self):
         answers = {"vulkaninfo": VULKANINFO, "rev-parse": "b" * 40 + "\n", "log": "2026-11-25\n",

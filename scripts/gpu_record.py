@@ -18,7 +18,8 @@ It prints the record in the fields the files in gpu-test-results/ use (`GPU:`, `
 not exist yet. What a log cannot say stays yours to add: the GPU's family and PCI id, the compiler and CMake, and
 in `Notes:` how it was built and whether it was AI-assisted (`--note` adds a line; without one the record ends
 with a reminder line to replace). `--w64-graphics` takes the saved output of w64_graphics.py and adds a line with
-its ok counts per tier, its skip reasons and what failed.
+its ok counts per tier, its skip reasons and what failed. `--table-row` prints the row for the table in
+docs/gpu_test_results.md from the same facts (its `check.py` cell says `not run`: correct it if you ran it).
 
 Run it on the machine and in the checkout the logs come from, right after the runs: the driver, the commit and
 the tools are read now, not from the logs. It starts `vulkaninfo`, `git`, `llvm-mc --version` and
@@ -208,12 +209,36 @@ def record(runs, facts, notes):
     return out
 
 
+def table_row(runs, facts, entry):
+    """The row of the table in docs/gpu_test_results.md; `entry` is the record's file name in gpu-test-results/."""
+    first = runs[0][1]
+    low, high = first["subgroup"]
+    shaders = first["shaders"]
+    names = sorted({name for _, run in runs for name in run["failed"]})
+    same = len(runs) > 1 and counts(runs[0][1]) == counts(runs[1][1])
+    cells = [
+        f"{first['device']}, subgroup {low}..{high}",
+        ", ".join(part for part in (facts["driver"], f"Vulkan {facts['api']}" if facts["api"] else "",
+                                    facts["os"]) if part),
+        f"`{facts['commit'][:7]}`" if facts["commit"] else "(add it)",
+        f"{shaders[1]}/{shaders[0]} translated, {shaders[2]} valid (run_gpu_tests.py)" if shaders else "not run",
+        "not run",
+        f"{counts(first)} (native and `LEONIDA_W64_EMULATE=1` alike)" if same else
+        "; ".join(f"{counts(run)} ({'native' if label == 'native' else f'`{label}`'})" for label, run in runs),
+        ", ".join(f"`{name}`" for name in names) or "none",
+        f"[local note](../gpu-test-results/{entry})" if entry else "(link the record)",
+    ]
+    return "| " + " | ".join(cell.replace("|", "\\|") for cell in cells) + " |\n"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     ap.add_argument("--native", required=True, metavar="LOG", help="saved output of run_gpu_tests.py")
     ap.add_argument("--emulated", metavar="LOG", help="the same with LEONIDA_W64_EMULATE=1")
     ap.add_argument("--w64-graphics", metavar="LOG", help="saved output of w64_graphics.py, summed up in Notes:")
     ap.add_argument("--note", action="append", metavar="TEXT", help="a line for Notes: (repeat for more)")
+    ap.add_argument("--table-row", action="store_true",
+                    help="print the row for docs/gpu_test_results.md: instead of the record, or after --out wrote it")
     ap.add_argument("--llvm-mc", help="llvm-mc path or whole command, when it is not in LLVM_MC or on PATH")
     ap.add_argument("--out", metavar="FILE", help="write the record here instead of printing it; must not exist")
     args = ap.parse_args(argv)
@@ -232,9 +257,10 @@ def main(argv=None):
     except (OSError, LogError) as e:
         print(f"gpu_record: {e}", file=sys.stderr)
         return 2
-    text = record(runs, machine(runs[0][1]["device"], llvm_mc=args.llvm_mc), notes)
+    facts = machine(runs[0][1]["device"], llvm_mc=args.llvm_mc)
+    text = record(runs, facts, notes)
     if not args.out:
-        sys.stdout.write(text)
+        sys.stdout.write(table_row(runs, facts, None) if args.table_row else text)
         return 0
     try:
         with open(args.out, "x", encoding="utf-8", newline="\n") as f:
@@ -243,6 +269,8 @@ def main(argv=None):
         print(f"gpu_record: {args.out}: {e.strerror or e}", file=sys.stderr)
         return 2
     print(f"wrote {args.out}")
+    if args.table_row:
+        sys.stdout.write(table_row(runs, facts, os.path.basename(args.out)))
     return 0
 
 
