@@ -25,5 +25,8 @@ Notes:
 - Same PCI id as GraniteRidge-9950X3D.txt, on an older AMD driver branch (25.10.36 here) and a newer
   commit. The CPU model was not read out.
 - Built with CMake + Ninja, RelWithDebInfo, only the seven test programs run_gpu_tests.py starts. The
-  separate d3d12_*_test programs, w64_graphics.py and ctest were not run.
+  separate d3d12_*_test programs and ctest were not run.
+- w64_graphics.py with W64G_SAVE_REF (the reference for the NVIDIA device): 18 ok, 12 tier C fixtures
+  skipped ("tier C needs a device that can require both 64 and 32, or W64G_REF"), exit 0. Built with
+  build.py without cs_dpp_cmp, which this llvm-mc 21.1.8 does not assemble.
 - AI-assisted (Claude Code built the programs, ran the tests and wrote this file). No game files.

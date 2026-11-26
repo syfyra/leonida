@@ -22,7 +22,12 @@ Notes:
   was selected with LEONIDA_VK_DEVICE=5080.
 - Built with CMake + Ninja, RelWithDebInfo, only the seven test programs run_gpu_tests.py starts
   (vk_compute_test, vk_store_test, vk_harness, vk_texture_test, vk_bindless_test, vk_sampler_test,
-  d3d12_texture_uav_test). The separate d3d12_*_test programs, w64_graphics.py and ctest were not run.
+  d3d12_texture_uav_test). The separate d3d12_*_test programs and ctest were not run.
+- w64_graphics.py with W64G_REF from the 64-lane run of the machine's AMD device (this device can require
+  32 only): 22 ok (10 tier A, 8 tier B, 4 tier C), 8 tier C fixtures skipped ("tier C needs a device that
+  can require both 64 and 32, or W64G_REF"), exit 0. The fixtures were built with build.py without
+  cs_dpp_cmp, which this llvm-mc 21.1.8 does not assemble ("dpp variant of this instruction is not
+  supported") and build.py stops at: 299 shaders translated, 299 pass spirv-val.
 - With --disasm-dir tests/semantic/fixtures/disasm (no llvm-mc): 83/101 passed, 17 skipped, 1 failed:
   cs_w64x_partial_swizzle is not translated from its listing ("branch without encoding").
 - AI-assisted (Claude Code built the programs, ran the tests and wrote this file). No game files.
