@@ -83,7 +83,7 @@ def w64_note(text):
         if result == "ok":
             ok[tier] += 1
         elif result.startswith("SKIP"):
-            skips[(tier, re.sub(r"^SKIP\s*\((.*)\)$", r"", result))] += 1
+            skips[(tier, re.sub(r"^SKIP\s*\((.*)\)$", r"\1", result))] += 1
         else:
             failed.append(f"{name} (tier {tier}): {result}")
     tiers = ", ".join(f"{ok[t]} tier {t}" for t in "ABC" if ok[t])
