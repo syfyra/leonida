@@ -96,6 +96,9 @@ How maintainers review and merge pull requests.
 
 - Read every comment on the pull request first. An open request from a maintainer means waiting for the author.
 - Check the pull request's head right before you act: authors often push while you review.
+- Before a merge round, `python -I scripts/pr_conflicts.py <numbers>` says which of those pull requests conflict
+  with `main` or with each other, an order that keeps the most of them mergeable, and how many other open pull
+  requests each merge would send to a rebase. With no numbers it prints that picture for all open pull requests.
 
 **Is it mergeable?**
 
