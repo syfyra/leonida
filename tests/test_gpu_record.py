@@ -193,6 +193,46 @@ class Main(unittest.TestCase):
             self.assertIn(word, err)
 
 
+W64G = """\
+gs_w64_a_ring                A  ok
+ps_w64_a_skip                A  ok
+vs_w64_b_waterfall           B  ok
+vs_w64_c_lane_id             C  SKIP (tier C needs W64G_REF)
+vs_w64_c_readlane            C  SKIP (tier C needs W64G_REF)
+"""
+
+
+class W64Graphics(unittest.TestCase):
+    def test_ok_per_tier_and_skip_reasons(self):
+        self.assertEqual(rec.w64_note(W64G), 'w64_graphics.py: 3 ok (2 tier A, 1 tier B), 2 tier C skipped '
+                                             '("tier C needs W64G_REF"), none failed.')
+
+    def test_a_failure_is_named_with_what_it_printed(self):
+        note = rec.w64_note(W64G + "ps_w64_c_x                   C  pixel 3 differs\n")
+        self.assertTrue(note.endswith(", 1 failed: ps_w64_c_x (tier C): pixel 3 differs."))
+
+    def test_other_text_is_refused(self):
+        with self.assertRaises(rec.LogError):
+            rec.w64_note(NATIVE)
+
+    def test_main_puts_it_first_in_notes(self):
+        with tempfile.TemporaryDirectory() as d:
+            paths = []
+            for name, text in (("n.log", NATIVE), ("w.log", W64G)):
+                paths.append(os.path.join(d, name))
+                with open(paths[-1], "w", encoding="utf-8", newline="\n") as f:
+                    f.write(text)
+            code, out, _ = run_main(["--native", paths[0], "--w64-graphics", paths[1], "--note", "mine"])
+            self.assertEqual(code, 0)
+            self.assertIn("Notes:\n- w64_graphics.py: 3 ok", out)
+            self.assertTrue(out.endswith("- mine\n"))
+            out = run_main(["--native", paths[0], "--w64-graphics", paths[1]])[1]
+            self.assertIn("- REPLACE THIS LINE", out)
+            code, _, err = run_main(["--native", paths[0], "--w64-graphics", paths[0]])
+            self.assertEqual(code, 2)
+            self.assertIn("w64_graphics.py", err)
+
+
 class Machine(unittest.TestCase):
     def test_reads_tools_through_their_output(self):
         answers = {"vulkaninfo": VULKANINFO, "rev-parse": "b" * 40 + "\n", "log": "2026-11-25\n",

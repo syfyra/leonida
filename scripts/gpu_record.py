@@ -2,7 +2,8 @@
 
     python -I scripts/run_gpu_tests.py --build runtime/build > native.log
     LEONIDA_W64_EMULATE=1 python -I scripts/run_gpu_tests.py --build runtime/build > emulated.log
-    python -I scripts/gpu_record.py --native native.log --emulated emulated.log [--note TEXT ...] [--out FILE]
+    python -I scripts/gpu_record.py --native native.log --emulated emulated.log [--w64-graphics w64.log]
+                                 [--note TEXT ...] [--out FILE]
 
 A record is written by hand today: the counts, the failed fixtures and the skip reasons are copied out of two
 runs, and the device, driver, system, commit and tool versions are looked up one by one. This reads all of it:
@@ -16,7 +17,8 @@ It prints the record in the fields the files in gpu-test-results/ use (`GPU:`, `
 `Commit:`, `Tools:`, `run_gpu_tests.py:`, `Failed:`, `Skipped:`, `Notes:`), or writes it to `--out`, which must
 not exist yet. What a log cannot say stays yours to add: the GPU's family and PCI id, the compiler and CMake, and
 in `Notes:` how it was built and whether it was AI-assisted (`--note` adds a line; without one the record ends
-with a reminder line to replace).
+with a reminder line to replace). `--w64-graphics` takes the saved output of w64_graphics.py and adds a line with
+its ok counts per tier, its skip reasons and what failed.
 
 Run it on the machine and in the checkout the logs come from, right after the runs: the driver, the commit and
 the tools are read now, not from the logs. It starts `vulkaninfo`, `git`, `llvm-mc --version` and
@@ -41,7 +43,9 @@ DEVICE = re.compile(r"(?m)^device:\s*(.+?)\s*\(subgroup\s+(\d+)\.\.(\d+)\)\s*$")
 SHADERS = re.compile(r"(?m)^(\d+) shaders: (\d+) translated, (\d+) pass spirv-val")
 TOTAL = re.compile(r"(?m)^(\d+)/(\d+) passed(?:, (\d+) skipped)?\s*$")
 RESULT = re.compile(r"(?m)^  (FAIL|SKIP)  (\S+)\s+(.*?)\s*$")
+W64 = re.compile(r"(?m)^(\S+)\s+([ABC])\s+(\S.*?)\s*$")
 WIDTH = 112
+REMINDER = "REPLACE THIS LINE: how it was built (generator, compiler), what else ran, and whether it was AI-assisted."
 
 
 class LogError(Exception):
@@ -67,6 +71,26 @@ def parse_log(text):
             "shaders": [int(g) for g in shaders.groups()] if shaders else None,
             "passed": passed, "total": count, "skipped": skipped, "failed_count": count - passed - skipped,
             "failed": failed, "skips": dict(skips.most_common())}
+
+
+def w64_note(text):
+    """A Notes: line for the output of w64_graphics.py: ok per tier, the skip reasons, and what failed."""
+    rows = W64.findall(text)
+    if not rows:
+        raise LogError("no `name  A|B|C  result` line: is this the output of w64_graphics.py?")
+    ok, skips, failed = Counter(), Counter(), []
+    for name, tier, result in rows:
+        if result == "ok":
+            ok[tier] += 1
+        elif result.startswith("SKIP"):
+            skips[(tier, re.sub(r"^SKIP\s*\((.*)\)$", r"", result))] += 1
+        else:
+            failed.append(f"{name} (tier {tier}): {result}")
+    tiers = ", ".join(f"{ok[t]} tier {t}" for t in "ABC" if ok[t])
+    note = f"w64_graphics.py: {sum(ok.values())} ok" + (f" ({tiers})" if tiers else "")
+    for (tier, reason), n in skips.most_common():
+        note += f', {n} tier {tier} skipped ("{reason}")'
+    return note + (f", {len(failed)} failed: " + "; ".join(failed) if failed else ", none failed") + "."
 
 
 def output_of(cmd):
@@ -180,8 +204,7 @@ def record(runs, facts, notes):
             ([head] if head else []) + [f"{label + ':':<{width}}{counts(run)}" for label, run in runs]))
     out += field("Failed", failed_text(runs))
     out += field("Skipped", skipped_text(runs))
-    out += "Notes:\n" + "".join(f"- {note}\n" for note in notes or [
-        "REPLACE THIS LINE: how it was built (generator, compiler), what else ran, and whether it was AI-assisted."])
+    out += "Notes:\n" + "".join(f"- {note}\n" for note in notes or [REMINDER])
     return out
 
 
@@ -189,6 +212,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     ap.add_argument("--native", required=True, metavar="LOG", help="saved output of run_gpu_tests.py")
     ap.add_argument("--emulated", metavar="LOG", help="the same with LEONIDA_W64_EMULATE=1")
+    ap.add_argument("--w64-graphics", metavar="LOG", help="saved output of w64_graphics.py, summed up in Notes:")
     ap.add_argument("--note", action="append", metavar="TEXT", help="a line for Notes: (repeat for more)")
     ap.add_argument("--llvm-mc", help="llvm-mc path or whole command, when it is not in LLVM_MC or on PATH")
     ap.add_argument("--out", metavar="FILE", help="write the record here instead of printing it; must not exist")
@@ -201,10 +225,14 @@ def main(argv=None):
                     runs.append((label, parse_log(f.read())))
         if len(runs) == 2 and runs[0][1]["device"] != runs[1][1]["device"]:
             raise LogError(f"the two logs are of different devices: {runs[0][1]['device']} and {runs[1][1]['device']}")
+        notes = list(args.note or [REMINDER])
+        if args.w64_graphics:
+            with open(args.w64_graphics, encoding="utf-8", errors="replace") as f:
+                notes.insert(0, w64_note(f.read()))
     except (OSError, LogError) as e:
         print(f"gpu_record: {e}", file=sys.stderr)
         return 2
-    text = record(runs, machine(runs[0][1]["device"], llvm_mc=args.llvm_mc), args.note)
+    text = record(runs, machine(runs[0][1]["device"], llvm_mc=args.llvm_mc), notes)
     if not args.out:
         sys.stdout.write(text)
         return 0
