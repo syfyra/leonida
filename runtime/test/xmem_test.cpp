@@ -837,6 +837,16 @@ int64_t commit_growth(const PERFORMANCE_INFORMATION& from, const PERFORMANCE_INF
            static_cast<int64_t>(to.PageSize);
 }
 
+// How many of the `pages` 64 KiB pages from `base` VirtualQuery reports committed.
+uint64_t committed_pages(const uint8_t* base, uint64_t pages) {
+    uint64_t n = 0;
+    for (uint64_t i = 0; i < pages; ++i) {
+        MEMORY_BASIC_INFORMATION info{};
+        if (VirtualQuery(base + i * kPage64k, &info, sizeof(info)) && info.State == MEM_COMMIT) ++n;
+    }
+    return n;
+}
+
 // A title writes a window page it never mapped. Measured at the story load: a 288 KiB clear into a page of a window
 // reserved for physical pages, a page the title never passed to XMemMapPhysicalPages (runs/hrp13, gw2, tw512b, int1).
 // The console's window memory is zeroed and writable; on the host the placeholder there is PAGE_NOACCESS, so the write
@@ -1485,21 +1495,19 @@ void test_physical_pages_commit_on_touch(const PhysicalApi& api) {
         return;
     }
     check(api.map(window, kMapped, pages.data()) == window, "1,024 of them map into one window");
-    PERFORMANCE_INFORMATION mapped{};
-    GetPerformanceInfo(&mapped, sizeof(mapped));
-    check(commit_growth(allocated, mapped) < static_cast<int64_t>(kMapped * kPage64k / 2),
-          "mapping them does not charge them");
+    // What mapping and writing charge is read page by page: a page of these pagefile-backed SEC_RESERVE sections is
+    // charged to the system commit exactly when VirtualQuery reports it committed. The system-wide CommitTotal moves
+    // with every other process, and ctest runs xmem_test's three variants side by side, each of them touching and
+    // freeing 32 MiB here: a growth measured across this window missed its bounds when they ran together.
+    check(committed_pages(window, kMapped) == 0, "mapping them does not charge them");
 
     for (uint64_t i = 0; i < kTouched; ++i) {
         static_cast<volatile uint32_t*>(static_cast<void*>(window + i * kPage64k))[0] =
             0xc0de0000u | static_cast<uint32_t>(i);
     }
-    PERFORMANCE_INFORMATION touched{};
-    GetPerformanceInfo(&touched, sizeof(touched));
-    const int64_t touched_growth = commit_growth(mapped, touched);
-    check(touched_growth >= static_cast<int64_t>(kTouched * kPage64k / 2) &&
-              touched_growth < static_cast<int64_t>(kMapped * kPage64k),
-          "writing to 512 of them charges about those 512 pages");
+    check(committed_pages(window, kTouched) == kTouched &&
+              committed_pages(window + kTouched * kPage64k, kMapped - kTouched) == 0,
+          "writing to 512 of them charges those 512 pages and no other");
     bool written = true;
     for (uint64_t i = 0; i < kTouched; ++i) written &= read_u32(window + i * kPage64k, 0) == (0xc0de0000u | i);
     check(written, "each touched page keeps what was written to it");
