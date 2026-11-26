@@ -1055,6 +1055,60 @@ void run_checks(const std::filesystem::path& root) {
               "and the old name is deleted");
     }
 
+    // A creating open of a name only the package has answers as the host does for an existing name (measured on
+    // Windows 11): CREATE_NEW of a file fails with ERROR_FILE_EXISTS and makes nothing, CREATE_ALWAYS replaces it and
+    // reports ERROR_ALREADY_EXISTS, and a folder stays a folder: no overlay file is made over it.
+    {
+        write_path(package / "misc" / "cnew.txt", "package");
+        SetLastError(0);
+        HANDLE h = create_w(L"GAME:\\misc\\cnew.txt", GENERIC_WRITE, 0, nullptr, CREATE_NEW, 0, nullptr);
+        check(h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_EXISTS,
+              "CREATE_NEW of a package file fails with ERROR_FILE_EXISTS");
+        if (h != INVALID_HANDLE_VALUE) ::CloseHandle(h);
+        check(!std::filesystem::exists(overlay / "misc" / "cnew.txt"), "and makes no overlay file");
+        h = create_w(L"GAME:\\misc\\cnew.txt", GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        check(h != INVALID_HANDLE_VALUE && read_handle(h) == "package", "the package file still reads its bytes");
+        if (h != INVALID_HANDLE_VALUE) ::CloseHandle(h);
+
+        write_path(package / "misc" / "calways.txt", "package");
+        SetLastError(0);
+        h = create_w(L"GAME:\\misc\\calways.txt", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+        check(h != INVALID_HANDLE_VALUE && GetLastError() == ERROR_ALREADY_EXISTS,
+              "CREATE_ALWAYS of a package file succeeds with ERROR_ALREADY_EXISTS, as over an existing file");
+        DWORD written = 0;
+        if (h != INVALID_HANDLE_VALUE) {
+            ::WriteFile(h, "new", 3, &written, nullptr);
+            ::CloseHandle(h);
+        }
+        check(read_path(overlay / "misc" / "calways.txt") == "new" &&
+                  read_path(package / "misc" / "calways.txt") == "package",
+              "the new bytes are in the overlay and the package file is untouched");
+        SetLastError(0);
+        h = create_w(L"GAME:\\misc\\brand_new.txt", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+        check(h != INVALID_HANDLE_VALUE && GetLastError() == 0, "CREATE_ALWAYS of a new name leaves no error");
+        if (h != INVALID_HANDLE_VALUE) ::CloseHandle(h);
+
+        std::filesystem::create_directories(package / "pkgdir");
+        SetLastError(0);
+        h = create_w(L"GAME:\\pkgdir", GENERIC_WRITE, 0, nullptr, CREATE_NEW, 0, nullptr);
+        check(h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_ACCESS_DENIED,
+              "CREATE_NEW over a package folder fails with ERROR_ACCESS_DENIED, as over a folder");
+        if (h != INVALID_HANDLE_VALUE) ::CloseHandle(h);
+        check(!std::filesystem::is_regular_file(overlay / "pkgdir"), "and no overlay file is made over the folder");
+        SetLastError(0);
+        h = create_w(L"GAME:\\pkgdir", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+                     FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        BY_HANDLE_FILE_INFORMATION info{};
+        check(h != INVALID_HANDLE_VALUE && GetLastError() == ERROR_ALREADY_EXISTS &&
+                  ::GetFileInformationByHandle(h, &info) && (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0,
+              "OPEN_ALWAYS with FILE_FLAG_BACKUP_SEMANTICS opens the package folder as a folder");
+        if (h != INVALID_HANDLE_VALUE) ::CloseHandle(h);
+        SetLastError(0);
+        const DWORD attributes = attributes_w(L"GAME:\\pkgdir");
+        check(attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0,
+              "and GAME:\\pkgdir is still a folder");
+    }
+
     // CopyFile: reads where a read would, writes the overlay; an existing name counts even if only the package has it.
     {
         check(copy_w(L"GAME:\\misc\\keep.txt", L"GAME:\\cache\\keep_copy.txt", TRUE) != FALSE &&

@@ -347,6 +347,10 @@ struct Target {
     DWORD error = 0;  // non-zero: the caller fails with this error and does not touch the host
     // A write-open's hold on the folder it opens in, until the Target goes after the host open (g_folder_locks).
     std::unique_lock<std::mutex> folder;
+    // A write target the title sees as a package file that the overlay has no copy of, and that was not copied up
+    // here (CREATE_NEW and CREATE_ALWAYS replace a file's bytes, so they do not copy): the host cannot tell that the
+    // name exists, so the caller answers for it (open_target, finish_create).
+    bool package_file = false;
 };
 
 Target fail(DWORD error) {
@@ -556,6 +560,21 @@ Target write_target(const std::wstring& path, bool copy_up) {
     // the contents (OPEN_EXISTING, TRUNCATE_EXISTING) has to fail on it instead. CREATE_ALWAYS and CREATE_NEW still
     // make a new overlay file, which reads prefer over the package and so over the marker.
     const std::filesystem::path package_path = disk_path(r.game, parts);
+    // A name the package has and the overlay does not: a folder is mirrored into the overlay first, as SetFileAttributes
+    // does, so the host open finds a folder and answers as it would for one (ERROR_ACCESS_DENIED for a file open,
+    // ERROR_FILE_EXISTS for CREATE_NEW with FILE_FLAG_BACKUP_SEMANTICS...) instead of making a file over the package's
+    // folder. A file is noted for the caller.
+    if (!deleted(r.overlay, parts) && !std::filesystem::exists(t.path, ec)) {
+        if (std::filesystem::is_directory(package_path, ec)) {
+            std::filesystem::create_directories(t.path, ec);
+            if (ec) {
+                t.error = static_cast<DWORD>(ec.value());
+                return t;
+            }
+        } else if (std::filesystem::is_regular_file(package_path, ec)) {
+            t.package_file = true;
+        }
+    }
     // One copy-up at a time: a second thread writing the same file waits here and then finds the first one's copy, so
     // it neither fails on the taken name nor collides with that file's open through a rename of its own.
     static std::mutex s_copy_mutex;
@@ -607,7 +626,17 @@ Target open_target(const std::wstring& path, DWORD access, DWORD disposition) {
     // bytes; CREATE_ALWAYS and CREATE_NEW replace it.
     const bool keeps_contents =
         disposition == OPEN_EXISTING || disposition == OPEN_ALWAYS || disposition == TRUNCATE_EXISTING;
-    return write_target(path, keeps_contents);
+    Target t = write_target(path, keeps_contents);
+    // CREATE_NEW of a name the package has fails as on the host (ERROR_FILE_EXISTS), and makes no overlay file: one
+    // would have hidden the package file's bytes behind an empty file.
+    if (!t.error && t.package_file && disposition == CREATE_NEW) t.error = ERROR_FILE_EXISTS;
+    return t;
+}
+
+// After a successful host open: CREATE_ALWAYS over a package file replaced an existing file, which the host reports
+// with ERROR_ALREADY_EXISTS, but the host saw only the overlay, where the name was new.
+void finish_create(const Target& t, DWORD disposition) {
+    if (t.package_file && disposition == CREATE_ALWAYS) SetLastError(ERROR_ALREADY_EXISTS);
 }
 
 // ---- FindFirstFile: the overlay and the package merged into one listing
@@ -891,7 +920,10 @@ HANDLE WINAPI create_file_w(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_
         note_open_failure("CreateFileW", name, error, _ReturnAddress());
         SetLastError(error);
     } else {
+        const DWORD error = GetLastError();
         note_open("CreateFileW", name, access, _ReturnAddress());
+        SetLastError(error);
+        finish_create(t, disposition);
     }
     return h;
 }
@@ -924,7 +956,10 @@ HANDLE WINAPI create_file2(LPCWSTR name, DWORD access, DWORD share, DWORD dispos
         note_open_failure("CreateFile2", name, error, _ReturnAddress());
         SetLastError(error);
     } else {
+        const DWORD error = GetLastError();
         note_open("CreateFile2", name, access, _ReturnAddress());
+        SetLastError(error);
+        finish_create(t, disposition);
     }
     return h;
 }
