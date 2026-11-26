@@ -876,5 +876,20 @@ counts each script printed. Label a single-test run clearly instead of presentin
 Post counts and pass/fail lines only, never shaders or logs from the game. A failure that is not in the table
 above gets its own issue, linked from your record.
 
+`scripts/gpu_record.py` writes most of that record from the saved output of the runs: the device and subgroup
+line, the shader counts, passed, skipped and failed for the native and the `LEONIDA_W64_EMULATE=1` run, each
+failure with its message and the skip reasons with their counts, plus the driver (`vulkaninfo`), system, commit
+and tool versions of the machine it runs on. It starts no test:
+
+```sh
+python -I scripts/run_gpu_tests.py --build runtime/build > native.log
+LEONIDA_W64_EMULATE=1 python -I scripts/run_gpu_tests.py --build runtime/build > emulated.log
+python -I scripts/gpu_record.py --native native.log --emulated emulated.log --out gpu-test-results/<name>.txt
+```
+
+`--w64-graphics w64.log` adds a line for a `w64_graphics.py` run and `--note TEXT` a line of your own. Read the
+result before you post it: the GPU's family, the compiler and CMake, how you built and whether the work was
+AI-assisted are yours to add.
+
 Use your system's detected CPU, GPU, VRAM and RAM model names in your result record, not benchmark scores.
 For a rough browser-based check against reference profiles, you can use [Can I Run Leonida](https://assttro.github.io/can-i-run-leonida/).
