@@ -1,0 +1,28 @@
+GPU:        NVIDIA GeForce RTX 5080 (Blackwell, PCI 10de:2c02), subgroup 32..32
+Driver:     NVIDIA 617.42 (Windows driver 32.0.16.1742), Vulkan 1.4.351
+Subgroup:   32..32 (the run_gpu_tests.py device line shows subgroup 32..32)
+OS:         Windows 11, 10.0.26200.9974
+Commit:     935a2cd5b6854b6abff43704f4569290c618a1ec (main, 2026-11-26)
+Tools:      llvm-mc 21.1.8 (native, built by scripts\build_llvm_mc.ps1), SPIRV-Tools v2026.4 (Vulkan SDK
+            1.4.363.1), CMake 3.31.6 + Ninja 1.12.1, MSVC 14.44.35207 (VS 2022 Build Tools), Python 3.14.7
+run_gpu_tests.py: 278 shaders: 278 translated, 278 pass spirv-val
+            native:                 211/268 passed, 55 skipped, 2 failed
+            LEONIDA_W64_EMULATE=1:  246/268 passed, 20 skipped, 2 failed
+Failed:     cs_imgatomic_ext, cs_texture_uav (native and emulated alike).
+            cs_imgatomic_ext: 6 of 64 sint words differ; first word 32: got 0x0badf00d, expected 0x00000101.
+            The words other records give for it.
+            cs_texture_uav: d3d12_texture_uav_test exits 1 with "texture view format lacks the required
+            formatless storage image access: 98". Not examined further on this machine.
+Skipped:    native: 34 "no 64-wide compute subgroup on this device" and 1 "no 64-wide subgroup on this
+            device" (the wave64 fixtures, which the emulated run runs), 1 "this device cannot require a
+            64-wide fragment subgroup: subgroup 32..32" (ps_w64x_readlane, skipped in the emulated run too)
+            and 19 "run by d3d12_*_test / w64_graphics.py" cases. Emulated: those 19 and the fragment one.
+Notes:
+- The machine also has an integrated AMD Radeon (GraniteRidge-251036-Windows.txt, same runs); the device
+  was selected with LEONIDA_VK_DEVICE=5080.
+- Built with CMake + Ninja, RelWithDebInfo, only the seven test programs run_gpu_tests.py starts
+  (vk_compute_test, vk_store_test, vk_harness, vk_texture_test, vk_bindless_test, vk_sampler_test,
+  d3d12_texture_uav_test). The separate d3d12_*_test programs, w64_graphics.py and ctest were not run.
+- With --disasm-dir tests/semantic/fixtures/disasm (no llvm-mc): 83/101 passed, 17 skipped, 1 failed:
+  cs_w64x_partial_swizzle is not translated from its listing ("branch without encoding").
+- AI-assisted (Claude Code built the programs, ran the tests and wrote this file). No game files.
